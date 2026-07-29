@@ -99,7 +99,7 @@ export function FinalBoard({ players }) {
 
       {topPlayers.length > 0 && (
         <div className="top-players panel">
-          <h3>⭐ MVP FLAPPERS ⭐</h3>
+          <h3>🏈 TOP SCORERS 🏈</h3>
           {topPlayers.map((p, i) => (
             <div key={p.id || i} className="top-player-row">
               <span>

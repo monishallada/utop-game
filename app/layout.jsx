@@ -16,7 +16,7 @@ const rubik = Rubik({
 
 export const metadata = {
   title: "UTOP Flappybird",
-  description: "Scan, pick your squad, and flap for glory!",
+  description: "Scan, pick your squad, and fly the football for glory!",
 };
 
 export const viewport = {

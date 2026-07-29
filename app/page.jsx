@@ -80,7 +80,7 @@ export default function HostPage() {
       {phase === "lobby" && (
         <>
           <p className="title-sub">
-            🐤 Scan the code · pick your squad · flap for glory 🐤
+            🏈 Scan the code · pick your squad · fly the football 🏈
           </p>
 
           <div className="host-lobby">
@@ -131,11 +131,11 @@ export default function HostPage() {
               onClick={() =>
                 doAction(
                   "start",
-                  `Start the game with ${players.length} players?`
+                  `Kick off with ${players.length} players?`
                 )
               }
             >
-              🚀 START GAME
+              🏈 KICKOFF!
             </button>
             <button
               className="btn danger small"
@@ -160,7 +160,7 @@ export default function HostPage() {
       {phase === "playing" && (
         <>
           <p className="title-sub">
-            🎮 GAME ON! Live team standings — each player&apos;s best score
+            🏈 GAME ON! Live team standings — each player&apos;s best score
             counts toward the squad total.
           </p>
           <TeamBars players={players} showProgress />
@@ -171,11 +171,11 @@ export default function HostPage() {
               onClick={() =>
                 doAction(
                   "end",
-                  "End the game and show the final leaderboard?"
+                  "Blow the final whistle and show the leaderboard?"
                 )
               }
             >
-              🏁 END GAME → LEADERBOARD
+              🏁 FINAL WHISTLE → LEADERBOARD
             </button>
           </div>
         </>

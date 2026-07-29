@@ -1,6 +1,8 @@
-# 🐤 UTOP Flappybird
+# 🏈 UTOP Flappybird
 
-A classroom multiplayer Flappy Bird showdown. The big screen shows a QR code —
+A classroom multiplayer Flappy Bird showdown — football edition: you fly a
+spiraling football through yellow goalposts over a turf field under stadium
+lights. The big screen shows a QR code —
 students scan it on their phones, enter their name, pick their squad, and when
 everyone's in, the host starts the game. Each player gets **5 attempts**; their
 **best score** counts toward their team's total. Ends with a podium + confetti
@@ -11,9 +13,21 @@ leaderboard.
 | URL | Who | What |
 | --- | --- | --- |
 | `/` | Projector / big screen | Title, QR code, live lobby, START button, live team standings, final podium |
-| `/play` | Students' phones | Name → pick squad → lobby → flappy bird (5 tries) → results |
+| `/play` | Students' phones | Name → pick squad → lobby → fly the football (5 downs) → results |
 
-## Deploy (one time, ~5 minutes)
+## Deploy — one command 🚀
+
+```bash
+./setup.sh
+```
+
+That's it. The script logs you into Vercel (browser window opens once),
+deploys the app, provisions a **free Upstash Redis** database (the shared
+storage that keeps all 160 phones in sync), and redeploys. At the end it
+prints your game URL — open it on the projector.
+
+<details>
+<summary>Manual route (if you prefer the dashboard)</summary>
 
 1. Push this repo to GitHub.
 2. On [vercel.com](https://vercel.com) → **Add New Project** → import the repo → **Deploy** (no settings needed).
@@ -21,6 +35,8 @@ leaderboard.
    - In the Vercel project, go to the **Storage** tab → **Create Database** → **Upstash Redis** (free tier is plenty).
    - Connect it to the project (env vars are added automatically) → **Redeploy**.
 4. Open `https://your-app.vercel.app/` on the projector. Done!
+
+</details>
 
 > Without Redis the app still runs, but on Vercel each request may hit a
 > different server, so players won't sync. The host screen shows a ⚠️ warning
@@ -30,9 +46,9 @@ leaderboard.
 
 1. Put `/` on the projector — kids scan the QR code.
 2. Watch the 12 team cards fill up (counter shows x/160).
-3. Hit **🚀 START GAME** — every phone flips into the game.
-4. Watch live team standings while they play (5 attempts each, best counts).
-5. Hit **🏁 END GAME** — podium, confetti, MVP top-10 everywhere.
+3. Hit **🏈 KICKOFF!** — every phone flips into the game.
+4. Watch live team standings while they play (5 downs each, best counts).
+5. Hit **🏁 FINAL WHISTLE** — podium, confetti, top-10 scorers everywhere.
 6. **🔄 NEW GAME** resets everything for the next class.
 
 ## The 12 squads

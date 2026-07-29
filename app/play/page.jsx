@@ -174,7 +174,7 @@ export default function PlayPage() {
 
       {step === "boot" && (
         <div className="step-card panel">
-          <div className="waiting-bird"><span className="spin">🐤</span></div>
+          <div className="waiting-bird"><span className="spin">🏈</span></div>
           <div className="hint">loading…</div>
         </div>
       )}
@@ -233,15 +233,15 @@ export default function PlayPage() {
 
       {step === "lobby" && myTeam && (
         <div className="step-card panel" style={{ "--team": myTeam.color }}>
-          <div className="waiting-bird">🐤</div>
-          <div className="step-title">YOU&apos;RE IN!</div>
+          <div className="waiting-bird">🏈</div>
+          <div className="step-title">YOU&apos;RE ON THE ROSTER!</div>
           <div className="badge" style={{ "--team": myTeam.color }}>
             {myTeam.emoji} {myTeam.name}
           </div>
           <div className="hint">
-            <strong>{count}</strong> player{count === 1 ? "" : "s"} in the lobby.
+            <strong>{count}</strong> player{count === 1 ? "" : "s"} in the stadium.
             <br />
-            Waiting for the host to start the game…
+            Waiting for kickoff…
             <br />
             Keep this page open! 📱
           </div>
@@ -255,8 +255,8 @@ export default function PlayPage() {
               {myTeam.emoji} {me.name}
             </span>
             <span className="hearts">
-              {"❤️".repeat(attemptsLeft)}
-              {"🖤".repeat(MAX_ATTEMPTS - attemptsLeft)}
+              {"🏈".repeat(attemptsLeft)}
+              {"⚪".repeat(MAX_ATTEMPTS - attemptsLeft)}
             </span>
             <span className="best">BEST {me.best}</span>
           </div>
@@ -272,9 +272,9 @@ export default function PlayPage() {
 
       {step === "done" && me && myTeam && (
         <div className="step-card panel">
-          <div className="waiting-bird">😮‍💨</div>
+          <div className="waiting-bird">🏟️</div>
           <div className="step-title">
-            ALL {MAX_ATTEMPTS} FLIGHTS FLOWN!
+            ALL {MAX_ATTEMPTS} DOWNS PLAYED!
             <br />
             <br />
             YOUR BEST: {me.best}
@@ -285,7 +285,7 @@ export default function PlayPage() {
           <div className="hint">
             Your best score is locked in for your squad. 💪
             <br />
-            Watch the big screen — final results coming soon!
+            Watch the big screen — final whistle coming soon!
           </div>
         </div>
       )}
@@ -304,7 +304,7 @@ export default function PlayPage() {
             <FinalBoard players={finalPlayers} />
           ) : (
             <div className="hint">
-              <span className="spin">🐤</span> loading results…
+              <span className="spin">🏈</span> loading results…
             </div>
           )}
         </div>

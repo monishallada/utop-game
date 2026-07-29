@@ -218,14 +218,14 @@ export default function FlappyGame({
 
       {mode === "ready" && (
         <div className="game-overlay" onPointerDown={flap}>
-          <div className="ov-title">TAP TO FLAP!</div>
+          <div className="ov-title">TAP TO FLY! 🏈</div>
           <div className="ov-sub">
-            Tap the screen (or press space) to fly.
+            Tap the screen (or press space) to keep
             <br />
-            Don&apos;t hit the pipes! 🟢
+            the ball in the air. Dodge the goalposts! 🥅
           </div>
           <div className="ov-sub">
-            ❤️ Attempts left: <strong>{attemptsLeft}</strong> · Best:{" "}
+            🏈 Downs left: <strong>{attemptsLeft}</strong> · Best:{" "}
             <strong>{best}</strong>
           </div>
         </div>
@@ -234,17 +234,17 @@ export default function FlappyGame({
       {mode === "dead" && (
         <div className="game-overlay">
           <div className="ov-title">
-            {wasBest ? "NEW BEST!" : "OUCH!"}
+            {wasBest ? "TOUCHDOWN!" : "TACKLED!"}
             <br />
             SCORE: {lastScore}
           </div>
-          {wasBest && <div className="new-best">🔥 personal record 🔥</div>}
+          {wasBest && <div className="new-best">🔥 new personal record 🔥</div>}
           <div className="ov-sub">
             Best: <strong>{Math.max(best, lastScore)}</strong>
           </div>
           {attemptsLeft > 0 ? (
             <button className="btn secondary" onPointerDown={(e) => e.stopPropagation()} onClick={again}>
-              🐤 FLY AGAIN ({attemptsLeft} LEFT)
+              🏈 NEXT DOWN ({attemptsLeft} LEFT)
             </button>
           ) : (
             <button className="btn" onClick={() => onFinished?.()}>
@@ -288,15 +288,9 @@ function draw(ctx, run, t, color, mode, clouds) {
   }
   ctx.globalAlpha = 1;
 
-  // moon
-  ctx.fillStyle = "#ffe9a8";
-  ctx.beginPath();
-  ctx.arc(330, 80, 26, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "rgba(255,233,168,0.15)";
-  ctx.beginPath();
-  ctx.arc(330, 80, 40, 0, Math.PI * 2);
-  ctx.fill();
+  // stadium floodlights (friday night lights!)
+  drawFloodlight(ctx, 40, t);
+  drawFloodlight(ctx, W - 40, t);
 
   // parallax clouds
   ctx.fillStyle = "rgba(255,255,255,0.14)";
@@ -305,38 +299,47 @@ function draw(ctx, run, t, color, mode, clouds) {
     drawCloud(ctx, cx, c.y, c.s);
   }
 
-  // pipes
+  // goalposts
   for (const p of run.pipes) {
-    drawPipe(ctx, p.x, 0, PIPE_W, p.gapY, true);
-    drawPipe(ctx, p.x, p.gapY + p.gap, PIPE_W, H - GROUND_H - (p.gapY + p.gap), false);
+    drawPost(ctx, p.x, 0, PIPE_W, p.gapY, true);
+    drawPost(ctx, p.x, p.gapY + p.gap, PIPE_W, H - GROUND_H - (p.gapY + p.gap), false);
   }
 
-  // ground
+  // turf field
   const gy = H - GROUND_H;
-  ctx.fillStyle = "#1c1638";
-  ctx.fillRect(0, gy, W, GROUND_H);
-  ctx.fillStyle = "#00e5cc";
+  const scroll = t * 90;
+  // mowed bands
+  const bandW = 46;
+  const bandOff = scroll % (bandW * 2);
+  for (let x = -bandW * 2; x < W + bandW * 2; x += bandW) {
+    const even = Math.round((x + bandOff) / bandW) % 2 === 0;
+    ctx.fillStyle = even ? "#1c7a33" : "#23913e";
+    ctx.fillRect(x - bandOff, gy, bandW + 1, GROUND_H);
+  }
+  // sideline
+  ctx.fillStyle = "#f5f5f0";
   ctx.fillRect(0, gy, W, 4);
-  ctx.fillStyle = "rgba(0,229,204,0.18)";
-  const scroll = (t * 90) % 34;
-  for (let x = -34; x < W + 34; x += 34) {
-    ctx.beginPath();
-    ctx.moveTo(x - scroll, gy + 8);
-    ctx.lineTo(x - scroll + 16, gy + 8);
-    ctx.lineTo(x - scroll + 6, GROUND_H + gy - 8);
-    ctx.lineTo(x - scroll - 10, GROUND_H + gy - 8);
-    ctx.closePath();
-    ctx.fill();
+  // yard lines + hash marks
+  ctx.fillStyle = "rgba(255,255,255,0.75)";
+  const yardOff = scroll % 92;
+  for (let x = -92; x < W + 92; x += 92) {
+    ctx.fillRect(x - yardOff, gy + 6, 3, GROUND_H - 10);
+  }
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  const hashOff = scroll % 23;
+  for (let x = -23; x < W + 23; x += 23) {
+    ctx.fillRect(x - hashOff, gy + 22, 2, 7);
+    ctx.fillRect(x - hashOff, gy + 44, 2, 7);
   }
 
-  // bird
+  // the football
   const bob = mode === "ready" ? Math.sin(t * 3) * 8 : 0;
   const by = (mode === "ready" ? H / 2 : run.y) + bob;
   const angle =
     mode === "playing" || run.dead
       ? Math.max(-0.5, Math.min(1.1, run.vel / 600))
       : Math.sin(t * 3) * 0.08;
-  drawBird(ctx, BIRD_X, by, angle, color, run.wing > 0 || mode === "ready" ? Math.sin(t * 20) : 0.6);
+  drawBall(ctx, BIRD_X, by, angle, color);
 
   // score
   if (mode === "playing" || run.dead) {
@@ -366,73 +369,109 @@ function drawCloud(ctx, x, y, s) {
   ctx.fill();
 }
 
-function drawPipe(ctx, x, y, w, h, isTop) {
+function drawFloodlight(ctx, x, t) {
+  // light beam glow
+  const beam = ctx.createRadialGradient(x, 26, 4, x, 26, 90);
+  beam.addColorStop(0, "rgba(255,250,220,0.35)");
+  beam.addColorStop(1, "rgba(255,250,220,0)");
+  ctx.fillStyle = beam;
+  ctx.beginPath();
+  ctx.arc(x, 26, 90, 0, Math.PI * 2);
+  ctx.fill();
+
+  // panel + bulbs
+  ctx.fillStyle = "#2a2f4a";
+  ctx.fillRect(x - 26, 12, 52, 26);
+  ctx.strokeStyle = "rgba(0,0,0,0.4)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x - 26, 12, 52, 26);
+  for (let r = 0; r < 2; r++) {
+    for (let c = 0; c < 3; c++) {
+      const glowPulse = 0.75 + 0.25 * Math.sin(t * 3 + r + c);
+      ctx.fillStyle = `rgba(255,248,214,${glowPulse})`;
+      ctx.beginPath();
+      ctx.arc(x - 15 + c * 15, 20 + r * 11, 4.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  // pole up to the top of the frame
+  ctx.fillStyle = "#232744";
+  ctx.fillRect(x - 3, 0, 6, 14);
+}
+
+function drawPost(ctx, x, y, w, h, isTop) {
   if (h <= 0) return;
   const grad = ctx.createLinearGradient(x, 0, x + w, 0);
-  grad.addColorStop(0, "#1f8a4c");
-  grad.addColorStop(0.35, "#3ddc84");
-  grad.addColorStop(1, "#166b3a");
+  grad.addColorStop(0, "#b97e14");
+  grad.addColorStop(0.35, "#ffcf4d");
+  grad.addColorStop(1, "#a56d0e");
   ctx.fillStyle = grad;
   ctx.fillRect(x, y, w, h);
 
-  // lip
-  const lipH = 22;
-  const lipY = isTop ? y + h - lipH : y;
+  // crossbar cap at the gap end
+  const capH = 20;
+  const capY = isTop ? y + h - capH : y;
   ctx.fillStyle = grad;
-  ctx.fillRect(x - 5, lipY, w + 10, lipH);
+  ctx.fillRect(x - 6, capY, w + 12, capH);
   ctx.strokeStyle = "rgba(0,0,0,0.35)";
   ctx.lineWidth = 2;
-  ctx.strokeRect(x - 5, lipY, w + 10, lipH);
+  ctx.strokeRect(x - 6, capY, w + 12, capH);
 
-  // shine
-  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  // shine + padded base look
+  ctx.fillStyle = "rgba(255,255,255,0.28)";
   ctx.fillRect(x + 8, y, 6, h);
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.fillRect(x + w - 12, y, 8, h);
 }
 
-function drawBird(ctx, x, y, angle, color, wingPhase) {
+function drawBall(ctx, x, y, angle, color) {
+  const RX = 20;
+  const RY = 13.5;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
 
-  // body
-  ctx.fillStyle = color;
+  // team-color glow so everyone spots their squad's ball
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 16;
+
+  // pigskin body
+  const grad = ctx.createLinearGradient(0, -RY, 0, RY);
+  grad.addColorStop(0, "#b05a2a");
+  grad.addColorStop(0.5, "#8f4318");
+  grad.addColorStop(1, "#6e3010");
+  ctx.fillStyle = grad;
   ctx.beginPath();
-  ctx.arc(0, 0, BIRD_R, 0, Math.PI * 2);
+  ctx.ellipse(0, 0, RX, RY, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(0,0,0,0.4)";
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // belly
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  // team-color end stripes (clipped to the ball)
+  ctx.save();
   ctx.beginPath();
-  ctx.arc(-2, 6, BIRD_R * 0.55, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.ellipse(0, 0, RX, RY, 0, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.fillStyle = color;
+  ctx.fillRect(-RX + 3, -RY, 5, RY * 2);
+  ctx.fillRect(RX - 8, -RY, 5, RY * 2);
+  ctx.restore();
 
-  // wing
-  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  // laces
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.ellipse(-5, 0, 9, 5.5, -0.5 + wingPhase * 0.5, 0, Math.PI * 2);
-  ctx.fill();
-
-  // eye
-  ctx.fillStyle = "#fff";
-  ctx.beginPath();
-  ctx.arc(6, -5, 5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#111";
-  ctx.beginPath();
-  ctx.arc(7.5, -5, 2.4, 0, Math.PI * 2);
-  ctx.fill();
-
-  // beak
-  ctx.fillStyle = "#ff9f1a";
-  ctx.beginPath();
-  ctx.moveTo(12, 0);
-  ctx.lineTo(22, 3);
-  ctx.lineTo(12, 7);
-  ctx.closePath();
-  ctx.fill();
+  ctx.moveTo(-8, -3);
+  ctx.lineTo(8, -3);
+  ctx.stroke();
+  for (let i = -6; i <= 6; i += 4) {
+    ctx.beginPath();
+    ctx.moveTo(i, -6);
+    ctx.lineTo(i, 0);
+    ctx.stroke();
+  }
 
   ctx.restore();
 }
