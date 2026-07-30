@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MAX_ATTEMPTS, TD_YARDS, YARDS_PER_GATE } from "@/lib/teams";
 
 const W = 400;
 const H = 600;
@@ -11,6 +12,19 @@ const GRAVITY = 1650;
 const FLAP_V = -440;
 const MAX_FALL = 720;
 const PIPE_W = 66;
+
+// UNC Charlotte palette for the canvas
+const C = {
+  skyTop: "#03231a",
+  skyMid: "#05402c",
+  skyLow: "#0a6b45",
+  horizon: "#c8b06a",
+  turfDark: "#004a30",
+  turfLight: "#00603d",
+  gold: "#a49665",
+  goldBright: "#d4bd7d",
+  goldDark: "#6f6340",
+};
 
 function makeAudio() {
   let ctx = null;
@@ -39,11 +53,49 @@ function makeAudio() {
     osc.start();
     osc.stop(c.currentTime + dur);
   };
+  const touchdown = () => {
+    const c = ensure();
+    if (!c) return;
+    // stadium horn fanfare: C-E-G-C arpeggio with a held final note
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((f, i) => {
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+      osc.type = "triangle";
+      const t0 = c.currentTime + i * 0.13;
+      const hold = i === notes.length - 1 ? 0.7 : 0.16;
+      osc.frequency.setValueAtTime(f, t0);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.1, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + hold);
+      osc.connect(gain).connect(c.destination);
+      osc.start(t0);
+      osc.stop(t0 + hold + 0.05);
+    });
+    // crowd roar: filtered noise swell
+    const dur = 1.6;
+    const buf = c.createBuffer(1, c.sampleRate * dur, c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    const filter = c.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 900;
+    filter.Q.value = 0.6;
+    const gain = c.createGain();
+    gain.gain.setValueAtTime(0.0001, c.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.07, c.currentTime + 0.25);
+    gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+    src.connect(filter).connect(gain).connect(c.destination);
+    src.start();
+  };
   return {
     unlock: ensure,
     flap: () => tone(500, 800, 0.09, "square", 0.045),
     point: () => tone(880, 1320, 0.14, "sine", 0.07),
     hit: () => tone(220, 40, 0.35, "sawtooth", 0.09),
+    touchdown,
   };
 }
 
@@ -57,22 +109,24 @@ function freshRun() {
     wing: 0,
     shake: 0,
     flash: 0,
+    tdFlash: 0,
     dead: false,
   };
 }
 
 export default function FlappyGame({
-  color = "#FFD700",
+  color = "#a49665",
   attemptsLeft,
-  best,
+  driveYards,
+  touchdowns,
   onRunEnd,
   onFinished,
 }) {
   const canvasRef = useRef(null);
-  const [mode, setMode] = useState("ready"); // ready | playing | dead
+  const [mode, setMode] = useState("ready"); // ready | playing | dead | td
   const modeRef = useRef("ready");
-  const [lastScore, setLastScore] = useState(0);
-  const [wasBest, setWasBest] = useState(false);
+  const [lastGates, setLastGates] = useState(0);
+  const [result, setResult] = useState(null); // server truth after a run
   const runRef = useRef(freshRun());
   const audioRef = useRef(null);
   const cloudsRef = useRef(
@@ -82,26 +136,36 @@ export default function FlappyGame({
       s: 0.6 + ((i * 31) % 10) / 12,
     }))
   );
-  const bestRef = useRef(best);
-  bestRef.current = best;
+  const driveRef = useRef(driveYards);
+  driveRef.current = driveYards;
 
   const setModeBoth = (m) => {
     modeRef.current = m;
     setMode(m);
   };
 
-  const die = useCallback(() => {
-    const run = runRef.current;
-    if (run.dead) return;
-    run.dead = true;
-    run.shake = 0.4;
-    run.flash = 0.25;
-    audioRef.current?.hit();
-    setLastScore(run.score);
-    setWasBest(run.score > (bestRef.current || 0));
-    setModeBoth("dead");
-    onRunEnd?.(run.score);
-  }, [onRunEnd]);
+  const finishRun = useCallback(
+    async (isTd) => {
+      const run = runRef.current;
+      if (run.dead) return;
+      run.dead = true;
+      if (isTd) {
+        run.tdFlash = 0.6;
+        audioRef.current?.touchdown();
+        setModeBoth("td");
+      } else {
+        run.shake = 0.4;
+        run.flash = 0.25;
+        audioRef.current?.hit();
+        setModeBoth("dead");
+      }
+      setLastGates(run.score);
+      setResult(null);
+      const res = await onRunEnd?.(run.score);
+      if (res) setResult(res);
+    },
+    [onRunEnd]
+  );
 
   const flap = useCallback(() => {
     if (!audioRef.current) audioRef.current = makeAudio();
@@ -175,6 +239,14 @@ export default function FlappyGame({
           if (!p.passed && p.x + PIPE_W < BIRD_X - BIRD_R) {
             p.passed = true;
             run.score += 1;
+            // crossed the goal line mid-run → touchdown, right now!
+            if (
+              driveRef.current + run.score * YARDS_PER_GATE >= TD_YARDS
+            ) {
+              audioRef.current?.point();
+              finishRun(true);
+              break;
+            }
             audioRef.current?.point();
           }
           const withinX =
@@ -183,12 +255,12 @@ export default function FlappyGame({
             withinX &&
             (run.y - BIRD_R < p.gapY || run.y + BIRD_R > p.gapY + p.gap)
           ) {
-            die();
+            finishRun(false);
           }
         }
         if (run.y + BIRD_R >= H - GROUND_H) {
           run.y = H - GROUND_H - BIRD_R;
-          die();
+          finishRun(false);
         }
         if (run.y - BIRD_R < 0) {
           run.y = BIRD_R;
@@ -198,59 +270,114 @@ export default function FlappyGame({
 
       run.shake = Math.max(0, run.shake - dt);
       run.flash = Math.max(0, run.flash - dt);
+      run.tdFlash = Math.max(0, run.tdFlash - dt);
 
-      draw(ctx, run, idleT, color, modeRef.current, cloudsRef.current);
+      draw(
+        ctx,
+        run,
+        idleT,
+        color,
+        modeRef.current,
+        cloudsRef.current,
+        driveRef.current
+      );
       raf = requestAnimationFrame(step);
     };
 
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [color, die]);
+  }, [color, finishRun]);
 
   const again = () => {
     runRef.current = freshRun();
+    setResult(null);
     setModeBoth("ready");
   };
 
+  const gainedYards = lastGates * YARDS_PER_GATE;
+  // fall back to local math until the server response lands
+  const remaining =
+    result != null
+      ? Math.max(0, MAX_ATTEMPTS - result.attempts)
+      : Math.max(0, attemptsLeft - 1);
+  const driveNow =
+    result != null
+      ? result.yards
+      : Math.min(TD_YARDS - YARDS_PER_GATE, driveYards + gainedYards);
+  const tdCount = result != null ? result.touchdowns : touchdowns;
+
+  const continueButtons = (label) =>
+    remaining > 0 ? (
+      <button
+        className="btn secondary"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={again}
+      >
+        {label} ({remaining} LEFT)
+      </button>
+    ) : (
+      <button className="btn" onClick={() => onFinished?.()}>
+        🏁 DRIVE OVER — SEE RESULTS
+      </button>
+    );
+
   return (
-    <div className="canvas-holder" onPointerDown={mode !== "dead" ? flap : undefined}>
+    <div className="canvas-holder" onPointerDown={mode === "ready" || mode === "playing" ? flap : undefined}>
       <canvas ref={canvasRef} style={{ aspectRatio: `${W} / ${H}` }} />
 
       {mode === "ready" && (
         <div className="game-overlay" onPointerDown={flap}>
-          <div className="ov-title">TAP TO FLY! 🏈</div>
+          <div className="ov-title">TAP TO SNAP! 🏈</div>
           <div className="ov-sub">
-            Tap the screen (or press space) to keep
+            Tap (or press space) to keep the ball flying.
             <br />
-            the ball in the air. Dodge the goalposts! 🥅
+            Every gate you clear = <strong>{YARDS_PER_GATE} yards</strong>.
+          </div>
+          <div className="drive-chip">
+            DRIVE: <strong>{driveYards}</strong> / {TD_YARDS} YDS
           </div>
           <div className="ov-sub">
-            🏈 Downs left: <strong>{attemptsLeft}</strong> · Best:{" "}
-            <strong>{best}</strong>
+            🏈 Attempts left: <strong>{attemptsLeft}</strong> · TDs:{" "}
+            <strong>{touchdowns}</strong>
           </div>
+        </div>
+      )}
+
+      {mode === "td" && (
+        <div className="game-overlay td-overlay">
+          <div className="td-burst" aria-hidden="true">
+            {Array.from({ length: 24 }, (_, i) => (
+              <i key={i} style={{ "--i": i }} />
+            ))}
+          </div>
+          <div className="td-ball">🏈</div>
+          <div className="td-title">TOUCHDOWN!</div>
+          <div className="td-sub">
+            {TD_YARDS}-YARD DRIVE COMPLETE — SIX POINTS!
+          </div>
+          <div className="td-count">
+            YOUR TDs: <strong>{tdCount}</strong>
+          </div>
+          {continueButtons("🏈 NEW DRIVE")}
         </div>
       )}
 
       {mode === "dead" && (
         <div className="game-overlay">
           <div className="ov-title">
-            {wasBest ? "TOUCHDOWN!" : "TACKLED!"}
+            TACKLED!
             <br />
-            SCORE: {lastScore}
+            +{gainedYards} YDS
           </div>
-          {wasBest && <div className="new-best">🔥 new personal record 🔥</div>}
-          <div className="ov-sub">
-            Best: <strong>{Math.max(best, lastScore)}</strong>
+          <div className="drive-chip">
+            DRIVE: <strong>{driveNow}</strong> / {TD_YARDS} YDS
           </div>
-          {attemptsLeft > 0 ? (
-            <button className="btn secondary" onPointerDown={(e) => e.stopPropagation()} onClick={again}>
-              🏈 NEXT DOWN ({attemptsLeft} LEFT)
-            </button>
-          ) : (
-            <button className="btn" onClick={() => onFinished?.()}>
-              🏁 SEE RESULTS
-            </button>
+          {gainedYards > 0 && remaining > 0 && (
+            <div className="ov-sub">
+              Your yards carry over — next attempt picks up right here! 💪
+            </div>
           )}
+          {continueButtons("🏈 NEXT ATTEMPT")}
         </div>
       )}
     </div>
@@ -259,7 +386,7 @@ export default function FlappyGame({
 
 /* ---------------- drawing ---------------- */
 
-function draw(ctx, run, t, color, mode, clouds) {
+function draw(ctx, run, t, color, mode, clouds, driveYards) {
   ctx.save();
   if (run.shake > 0) {
     ctx.translate(
@@ -268,32 +395,21 @@ function draw(ctx, run, t, color, mode, clouds) {
     );
   }
 
-  // sky
+  // Charlotte-green game-day sky with a gold horizon glow
   const sky = ctx.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, "#141b46");
-  sky.addColorStop(0.55, "#3b2f7d");
-  sky.addColorStop(0.85, "#8a4d9e");
-  sky.addColorStop(1, "#d96f6f");
+  sky.addColorStop(0, C.skyTop);
+  sky.addColorStop(0.5, C.skyMid);
+  sky.addColorStop(0.82, C.skyLow);
+  sky.addColorStop(1, C.horizon);
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, W, H);
 
-  // stars
-  ctx.fillStyle = "rgba(255,255,255,0.8)";
-  for (let i = 0; i < 24; i++) {
-    const sx = (i * 61) % W;
-    const sy = (i * 47) % (H / 2);
-    const tw = 0.5 + 0.5 * Math.sin(t * 2 + i);
-    ctx.globalAlpha = 0.25 + tw * 0.5;
-    ctx.fillRect(sx, sy, 2, 2);
-  }
-  ctx.globalAlpha = 1;
-
-  // stadium floodlights (friday night lights!)
+  // stadium floodlights
   drawFloodlight(ctx, 40, t);
   drawFloodlight(ctx, W - 40, t);
 
   // parallax clouds
-  ctx.fillStyle = "rgba(255,255,255,0.14)";
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
   for (const c of clouds) {
     const cx = ((c.x - t * 18 * c.s) % (W + 120)) + (((c.x - t * 18 * c.s) % (W + 120)) < -60 ? W + 120 : 0);
     drawCloud(ctx, cx, c.y, c.s);
@@ -308,12 +424,12 @@ function draw(ctx, run, t, color, mode, clouds) {
   // turf field
   const gy = H - GROUND_H;
   const scroll = t * 90;
-  // mowed bands
+  // mowed bands in Charlotte green
   const bandW = 46;
   const bandOff = scroll % (bandW * 2);
   for (let x = -bandW * 2; x < W + bandW * 2; x += bandW) {
     const even = Math.round((x + bandOff) / bandW) % 2 === 0;
-    ctx.fillStyle = even ? "#1c7a33" : "#23913e";
+    ctx.fillStyle = even ? C.turfDark : C.turfLight;
     ctx.fillRect(x - bandOff, gy, bandW + 1, GROUND_H);
   }
   // sideline
@@ -341,24 +457,60 @@ function draw(ctx, run, t, color, mode, clouds) {
       : Math.sin(t * 3) * 0.08;
   drawBall(ctx, BIRD_X, by, angle, color);
 
-  // score
+  // drive meter across the top: how close is this drive to the end zone?
+  const liveYards = Math.min(
+    TD_YARDS,
+    driveYards + run.score * YARDS_PER_GATE
+  );
+  const meterW = W - 60;
+  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  roundRect(ctx, 30, 14, meterW, 12, 6);
+  ctx.fill();
+  if (liveYards > 0) {
+    const fill = ctx.createLinearGradient(30, 0, 30 + meterW, 0);
+    fill.addColorStop(0, C.gold);
+    fill.addColorStop(1, C.goldBright);
+    ctx.fillStyle = fill;
+    roundRect(ctx, 30, 14, Math.max(8, meterW * (liveYards / TD_YARDS)), 12, 6);
+    ctx.fill();
+  }
+  ctx.font = "800 13px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#fff";
+  ctx.fillText(`DRIVE ${liveYards} / ${TD_YARDS} YDS`, W / 2, 44);
+
+  // yards gained this attempt
   if (mode === "playing" || run.dead) {
-    ctx.font = "700 44px 'Courier New', monospace";
-    ctx.textAlign = "center";
+    ctx.font = "800 44px system-ui, sans-serif";
     ctx.lineWidth = 6;
     ctx.strokeStyle = "rgba(0,0,0,0.55)";
-    ctx.strokeText(String(run.score), W / 2, 70);
-    ctx.fillStyle = "#fff";
-    ctx.fillText(String(run.score), W / 2, 70);
+    const label = `+${run.score * YARDS_PER_GATE}`;
+    ctx.strokeText(label, W / 2, 96);
+    ctx.fillStyle = C.goldBright;
+    ctx.fillText(label, W / 2, 96);
   }
 
-  // hit flash
+  // hit flash (white) / touchdown flash (gold)
   if (run.flash > 0) {
     ctx.fillStyle = `rgba(255,255,255,${run.flash * 2.4})`;
     ctx.fillRect(0, 0, W, H);
   }
+  if (run.tdFlash > 0) {
+    ctx.fillStyle = `rgba(212,189,125,${run.tdFlash * 1.4})`;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 function drawCloud(ctx, x, y, s) {
@@ -372,7 +524,7 @@ function drawCloud(ctx, x, y, s) {
 function drawFloodlight(ctx, x, t) {
   // light beam glow
   const beam = ctx.createRadialGradient(x, 26, 4, x, 26, 90);
-  beam.addColorStop(0, "rgba(255,250,220,0.35)");
+  beam.addColorStop(0, "rgba(255,250,220,0.32)");
   beam.addColorStop(1, "rgba(255,250,220,0)");
   ctx.fillStyle = beam;
   ctx.beginPath();
@@ -380,7 +532,7 @@ function drawFloodlight(ctx, x, t) {
   ctx.fill();
 
   // panel + bulbs
-  ctx.fillStyle = "#2a2f4a";
+  ctx.fillStyle = "#0b3324";
   ctx.fillRect(x - 26, 12, 52, 26);
   ctx.strokeStyle = "rgba(0,0,0,0.4)";
   ctx.lineWidth = 2;
@@ -395,16 +547,16 @@ function drawFloodlight(ctx, x, t) {
     }
   }
   // pole up to the top of the frame
-  ctx.fillStyle = "#232744";
+  ctx.fillStyle = "#082a1e";
   ctx.fillRect(x - 3, 0, 6, 14);
 }
 
 function drawPost(ctx, x, y, w, h, isTop) {
   if (h <= 0) return;
   const grad = ctx.createLinearGradient(x, 0, x + w, 0);
-  grad.addColorStop(0, "#b97e14");
-  grad.addColorStop(0.35, "#ffcf4d");
-  grad.addColorStop(1, "#a56d0e");
+  grad.addColorStop(0, C.goldDark);
+  grad.addColorStop(0.35, C.goldBright);
+  grad.addColorStop(1, "#5d5335");
   ctx.fillStyle = grad;
   ctx.fillRect(x, y, w, h);
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TEAMS, TEAM_MAP, MAX_ATTEMPTS } from "@/lib/teams";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { TEAMS, TEAM_MAP, MAX_ATTEMPTS, TD_YARDS } from "@/lib/teams";
 import FlappyGame from "@/components/FlappyGame";
 import { FinalBoard } from "@/components/Scoreboard";
 
@@ -128,7 +128,15 @@ export default function PlayPage() {
         return;
       }
       localStorage.setItem(STORAGE_KEY, data.id);
-      setMe({ id: data.id, name: name.trim(), team: teamPick, best: 0, attempts: 0 });
+      setMe({
+        id: data.id,
+        name: name.trim(),
+        team: teamPick,
+        attempts: 0,
+        yards: 0,
+        touchdowns: 0,
+        totalYards: 0,
+      });
       setPhase(data.phase);
       if (data.phase === "playing") setStep("game");
       else if (data.phase === "ended") setStep("final");
@@ -140,21 +148,36 @@ export default function PlayPage() {
     }
   };
 
-  const submitScore = useCallback(async (score) => {
+  // Submit the gates cleared this attempt; returns the server's updated
+  // truth (attempts, drive yards, touchdowns) so the game overlay can show it.
+  const submitScore = useCallback(async (gates) => {
     const id = localStorage.getItem(STORAGE_KEY);
-    if (!id) return;
+    if (!id) return null;
     try {
       const res = await fetch("/api/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, score }),
+        body: JSON.stringify({ id, gates }),
       });
       const data = await res.json();
-      if (res.ok || data.attempts != null) {
-        setMe((m) => (m ? { ...m, best: data.best, attempts: data.attempts } : m));
+      if (data.attempts != null) {
+        setMe((m) =>
+          m
+            ? {
+                ...m,
+                attempts: data.attempts,
+                yards: data.yards,
+                touchdowns: data.touchdowns,
+                totalYards: data.totalYards,
+              }
+            : m
+        );
+        return data;
       }
+      return null;
     } catch {
-      /* score lost to a network blip — their next run can still beat it */
+      /* score lost to a network blip — the next poll re-syncs */
+      return null;
     }
   }, []);
 
@@ -163,8 +186,8 @@ export default function PlayPage() {
 
   const title = (
     <h1 className="title">
-      <span className="utop">✦ UTOP ✦</span>
-      <span className="flappy">FLAPPYBIRD</span>
+      <span className="utop">UNC CHARLOTTE ⛏ UTOP</span>
+      <span className="flappy">GRIDIRON FLAPPY</span>
     </h1>
   );
 
@@ -226,7 +249,7 @@ export default function PlayPage() {
           </div>
           {error && <div className="err">{error}</div>}
           <button className="btn" disabled={!teamPick || busy} onClick={join}>
-            {busy ? "JOINING…" : "JOIN LOBBY 🚀"}
+            {busy ? "JOINING…" : "JOIN THE ROSTER 🏈"}
           </button>
         </div>
       )}
@@ -241,9 +264,10 @@ export default function PlayPage() {
           <div className="hint">
             <strong>{count}</strong> player{count === 1 ? "" : "s"} in the stadium.
             <br />
-            Waiting for kickoff…
+            You get <strong>{MAX_ATTEMPTS} attempts</strong> — march your drive{" "}
+            <strong>{TD_YARDS} yards</strong> for a touchdown!
             <br />
-            Keep this page open! 📱
+            Waiting for kickoff… keep this page open! 📱
           </div>
         </div>
       )}
@@ -258,12 +282,24 @@ export default function PlayPage() {
               {"🏈".repeat(attemptsLeft)}
               {"⚪".repeat(MAX_ATTEMPTS - attemptsLeft)}
             </span>
-            <span className="best">BEST {me.best}</span>
+            <span className="best">{me.touchdowns} TD{me.touchdowns === 1 ? "" : "s"}</span>
+          </div>
+          <div className="drive-meter panel">
+            <div className="drive-meter-label">
+              DRIVE <strong>{me.yards}</strong> / {TD_YARDS} YDS
+            </div>
+            <div className="drive-meter-track">
+              <div
+                className="drive-meter-fill"
+                style={{ width: `${(me.yards / TD_YARDS) * 100}%` }}
+              />
+            </div>
           </div>
           <FlappyGame
             color={myTeam.color}
             attemptsLeft={attemptsLeft}
-            best={me.best}
+            driveYards={me.yards}
+            touchdowns={me.touchdowns}
             onRunEnd={submitScore}
             onFinished={() => setStep(phase === "ended" ? "final" : "done")}
           />
@@ -274,16 +310,23 @@ export default function PlayPage() {
         <div className="step-card panel">
           <div className="waiting-bird">🏟️</div>
           <div className="step-title">
-            ALL {MAX_ATTEMPTS} DOWNS PLAYED!
-            <br />
-            <br />
-            YOUR BEST: {me.best}
+            ALL {MAX_ATTEMPTS} ATTEMPTS USED!
+          </div>
+          <div className="stat-row">
+            <div className="stat">
+              <span className="stat-num">{me.touchdowns}</span>
+              <span className="stat-label">TOUCHDOWN{me.touchdowns === 1 ? "" : "S"}</span>
+            </div>
+            <div className="stat">
+              <span className="stat-num">{me.totalYards}</span>
+              <span className="stat-label">TOTAL YARDS</span>
+            </div>
           </div>
           <div className="badge" style={{ "--team": myTeam.color }}>
             {myTeam.emoji} {myTeam.name}
           </div>
           <div className="hint">
-            Your best score is locked in for your squad. 💪
+            Every TD and yard counts toward your squad&apos;s total. 💪
             <br />
             Watch the big screen — final whistle coming soon!
           </div>
@@ -296,7 +339,8 @@ export default function PlayPage() {
           {me && myTeam && (
             <div className="center" style={{ margin: "14px 0" }}>
               <div className="badge" style={{ "--team": myTeam.color }}>
-                {myTeam.emoji} {me.name} · best {me.best}
+                {myTeam.emoji} {me.name} · {me.touchdowns} TD ·{" "}
+                {me.totalYards} yds
               </div>
             </div>
           )}

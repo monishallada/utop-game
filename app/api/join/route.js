@@ -29,8 +29,10 @@ export async function POST(request) {
     id: crypto.randomUUID(),
     name,
     team,
-    best: 0,
     attempts: 0,
+    yards: 0,
+    touchdowns: 0,
+    totalYards: 0,
     joinedAt: Date.now(),
   };
   await savePlayer(player);

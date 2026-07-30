@@ -22,7 +22,7 @@ export default function HostPage() {
     QRCode.toDataURL(url, {
       width: 560,
       margin: 1,
-      color: { dark: "#0b1023", light: "#ffffff" },
+      color: { dark: "#00281b", light: "#ffffff" },
     }).then(setQr);
   }, []);
 
@@ -73,14 +73,14 @@ export default function HostPage() {
   return (
     <main className="host">
       <h1 className="title">
-        <span className="utop">✦ UTOP ✦</span>
-        <span className="flappy">FLAPPYBIRD</span>
+        <span className="utop">UNC CHARLOTTE ⛏ UTOP</span>
+        <span className="flappy">GRIDIRON FLAPPY</span>
       </h1>
 
       {phase === "lobby" && (
         <>
           <p className="title-sub">
-            🏈 Scan the code · pick your squad · fly the football 🏈
+            🏈 Scan the code · squad up · drive 100 yards for SIX! 🏈
           </p>
 
           <div className="host-lobby">
@@ -160,8 +160,8 @@ export default function HostPage() {
       {phase === "playing" && (
         <>
           <p className="title-sub">
-            🏈 GAME ON! Live team standings — each player&apos;s best score
-            counts toward the squad total.
+            🏈 GAME ON! 4 attempts each · yards carry over · 100 yards = a
+            touchdown. Most squad TDs wins!
           </p>
           <TeamBars players={players} showProgress />
           <div className="host-actions">
