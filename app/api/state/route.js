@@ -1,11 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  getPhase,
-  getPlayers,
-  getPlayer,
-  playerCount,
-  usingRedis,
-} from "@/lib/store";
+import { getPhase, getPlayers, getPlayer, playerCount } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +25,7 @@ export async function GET(request) {
         best: p.best,
         attempts: p.attempts,
       })),
-      redis: usingRedis(),
+      redis: true,
     });
   }
 

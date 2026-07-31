@@ -148,12 +148,6 @@ export default function HostPage() {
             </button>
           </div>
 
-          {state && state.redis === false && (
-            <p className="hint" style={{ marginTop: 24 }}>
-              ⚠️ Running on in-memory storage (no Redis connected). Fine for
-              local testing — add Upstash Redis on Vercel before class!
-            </p>
-          )}
         </>
       )}
 
