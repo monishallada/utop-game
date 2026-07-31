@@ -6,6 +6,18 @@ import FlappyGame from "@/components/FlappyGame";
 import { FinalBoard } from "@/components/Scoreboard";
 
 const STORAGE_KEY = "utop_player_id";
+const DEVICE_KEY = "utop_device_id";
+
+// Stable per-phone id so the server can recognize a device that already
+// joined and hand back the same player instead of creating a duplicate.
+function getDeviceId() {
+  let id = localStorage.getItem(DEVICE_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(DEVICE_KEY, id);
+  }
+  return id;
+}
 
 export default function PlayPage() {
   const [step, setStep] = useState("boot"); // boot|name|team|lobby|game|done|final
@@ -20,6 +32,8 @@ export default function PlayPage() {
   const [busy, setBusy] = useState(false);
   const stepRef = useRef(step);
   stepRef.current = step;
+  const joinInFlight = useRef(false);
+  const missesRef = useRef(0);
 
   const clearIdentity = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
@@ -32,12 +46,21 @@ export default function PlayPage() {
     setPhase(data.phase);
     setCount(data.count ?? 0);
     if (data.me === null) {
-      // host reset the game — start over
-      clearIdentity();
+      // The server didn't recognize us — usually a host reset, but it can
+      // also be one flaky response. Only give up our spot after several
+      // misses in a row so a single bad poll never kicks anyone out.
+      missesRef.current += 1;
+      if (missesRef.current >= 3) {
+        missesRef.current = 0;
+        clearIdentity();
+      }
       return;
     }
-    if (data.me) setMe(data.me);
     const p = data.me;
+    if (p) {
+      missesRef.current = 0;
+      setMe(p);
+    }
     if (data.phase === "ended") {
       setStep("final");
     } else if (data.phase === "playing" && p) {
@@ -56,9 +79,17 @@ export default function PlayPage() {
     }
     fetch(`/api/state?id=${id}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then(routeFromState)
+      .then((data) => {
+        if (data.me === null) {
+          // fresh page load and the server doesn't know us — start over
+          // (rejoining reclaims our old spot via the device id anyway)
+          clearIdentity();
+          return;
+        }
+        routeFromState(data);
+      })
       .catch(() => setStep("name"));
-  }, [routeFromState]);
+  }, [routeFromState, clearIdentity]);
 
   // polling — cadence depends on the step
   useEffect(() => {
@@ -72,6 +103,11 @@ export default function PlayPage() {
           const res = await fetch("/api/state?full=1", { cache: "no-store" });
           const data = await res.json();
           setPhase(data.phase);
+          if (data.phase === "ended") {
+            // game finished while they were still picking — show the winners
+            setStep("final");
+            return;
+          }
           setCount(data.count);
           const counts = {};
           for (const p of data.players) counts[p.team] = (counts[p.team] || 0) + 1;
@@ -84,9 +120,15 @@ export default function PlayPage() {
         const data = await res.json();
         // during a live run, only yank the player out for reset/ended
         if (stepRef.current === "game") {
-          if (data.me === null) clearIdentity();
-          else if (data.phase === "ended") setStep("final");
+          if (data.me === null) {
+            missesRef.current += 1;
+            if (missesRef.current >= 3) {
+              missesRef.current = 0;
+              clearIdentity();
+            }
+          } else if (data.phase === "ended") setStep("final");
           else {
+            missesRef.current = 0;
             setPhase(data.phase);
             setCount(data.count ?? 0);
           }
@@ -113,14 +155,19 @@ export default function PlayPage() {
   }, [step, finalPlayers]);
 
   const join = async () => {
-    if (!teamPick || busy) return;
+    if (!teamPick || busy || joinInFlight.current) return;
+    joinInFlight.current = true;
     setBusy(true);
     setError("");
     try {
       const res = await fetch("/api/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), team: teamPick }),
+        body: JSON.stringify({
+          name: name.trim(),
+          team: teamPick,
+          deviceId: getDeviceId(),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -128,6 +175,15 @@ export default function PlayPage() {
         return;
       }
       localStorage.setItem(STORAGE_KEY, data.id);
+      missesRef.current = 0;
+      if (data.rejoined) {
+        // this phone was already on the roster — sync to the server's record
+        const s = await fetch(`/api/state?id=${data.id}`, {
+          cache: "no-store",
+        }).then((r) => r.json());
+        routeFromState(s);
+        return;
+      }
       setMe({
         id: data.id,
         name: name.trim(),
@@ -143,6 +199,35 @@ export default function PlayPage() {
       else setStep("lobby");
     } catch {
       setError("Network hiccup — try again!");
+    } finally {
+      joinInFlight.current = false;
+      setBusy(false);
+    }
+  };
+
+  // Leave the roster (lobby only) so the player can pick a different squad.
+  // If the game already started the server refuses and we keep our spot —
+  // the next poll routes us into the game.
+  const leave = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const id = localStorage.getItem(STORAGE_KEY);
+      if (id) {
+        const res = await fetch("/api/leave", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id }),
+        });
+        if (!res.ok) return;
+      }
+      localStorage.removeItem(STORAGE_KEY);
+      setMe(null);
+      setTeamPick(null);
+      setStep("team");
+    } catch {
+      /* network blip — stay put, the player can tap again */
     } finally {
       setBusy(false);
     }
@@ -251,6 +336,16 @@ export default function PlayPage() {
           <button className="btn" disabled={!teamPick || busy} onClick={join}>
             {busy ? "JOINING…" : "JOIN THE ROSTER 🏈"}
           </button>
+          <button
+            className="btn secondary small"
+            disabled={busy}
+            onClick={() => {
+              setError("");
+              setStep("name");
+            }}
+          >
+            ◀ BACK
+          </button>
         </div>
       )}
 
@@ -269,6 +364,9 @@ export default function PlayPage() {
             <br />
             Waiting for kickoff… keep this page open! 📱
           </div>
+          <button className="btn secondary small" disabled={busy} onClick={leave}>
+            🚪 WRONG TEAM? PICK AGAIN
+          </button>
         </div>
       )}
 
