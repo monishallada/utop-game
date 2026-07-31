@@ -77,6 +77,25 @@ export default function HostPage() {
         <span className="flappy">GRIDIRON FLAPPY</span>
       </h1>
 
+      {state && state.redis === false && (
+        <p
+          style={{
+            background: "#7e1a1a",
+            color: "#fff",
+            fontWeight: 800,
+            padding: "10px 16px",
+            borderRadius: 10,
+            margin: "10px auto",
+            maxWidth: 720,
+            textAlign: "center",
+          }}
+        >
+          ⚠️ NO DATABASE CONNECTED — fine on localhost, but on Vercel the game
+          WILL break (kickoff won&apos;t stick, players get reset). Add Upstash
+          Redis in the Vercel dashboard, then redeploy.
+        </p>
+      )}
+
       {phase === "lobby" && (
         <>
           <p className="title-sub">
@@ -148,12 +167,6 @@ export default function HostPage() {
             </button>
           </div>
 
-          {state && state.redis === false && (
-            <p className="hint" style={{ marginTop: 24 }}>
-              ⚠️ Running on in-memory storage (no Redis connected). Fine for
-              local testing — add Upstash Redis on Vercel before class!
-            </p>
-          )}
         </>
       )}
 
