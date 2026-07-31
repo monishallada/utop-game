@@ -1,23 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { TEAMS, TEAM_MAP, MAX_ATTEMPTS, TD_YARDS } from "@/lib/teams";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { TEAMS, TEAM_MAP, MAX_ATTEMPTS } from "@/lib/teams";
 import FlappyGame from "@/components/FlappyGame";
 import { FinalBoard } from "@/components/Scoreboard";
 
 const STORAGE_KEY = "utop_player_id";
-const DEVICE_KEY = "utop_device_id";
-
-// Stable per-phone id so the server can recognize a device that already
-// joined and hand back the same player instead of creating a duplicate.
-function getDeviceId() {
-  let id = localStorage.getItem(DEVICE_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(DEVICE_KEY, id);
-  }
-  return id;
-}
 
 export default function PlayPage() {
   const [step, setStep] = useState("boot"); // boot|name|team|lobby|game|done|final
@@ -32,8 +20,6 @@ export default function PlayPage() {
   const [busy, setBusy] = useState(false);
   const stepRef = useRef(step);
   stepRef.current = step;
-  const joinInFlight = useRef(false);
-  const missesRef = useRef(0);
 
   const clearIdentity = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
@@ -46,21 +32,12 @@ export default function PlayPage() {
     setPhase(data.phase);
     setCount(data.count ?? 0);
     if (data.me === null) {
-      // The server didn't recognize us — usually a host reset, but it can
-      // also be one flaky response. Only give up our spot after several
-      // misses in a row so a single bad poll never kicks anyone out.
-      missesRef.current += 1;
-      if (missesRef.current >= 3) {
-        missesRef.current = 0;
-        clearIdentity();
-      }
+      // host reset the game — start over
+      clearIdentity();
       return;
     }
+    if (data.me) setMe(data.me);
     const p = data.me;
-    if (p) {
-      missesRef.current = 0;
-      setMe(p);
-    }
     if (data.phase === "ended") {
       setStep("final");
     } else if (data.phase === "playing" && p) {
@@ -79,17 +56,9 @@ export default function PlayPage() {
     }
     fetch(`/api/state?id=${id}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((data) => {
-        if (data.me === null) {
-          // fresh page load and the server doesn't know us — start over
-          // (rejoining reclaims our old spot via the device id anyway)
-          clearIdentity();
-          return;
-        }
-        routeFromState(data);
-      })
+      .then(routeFromState)
       .catch(() => setStep("name"));
-  }, [routeFromState, clearIdentity]);
+  }, [routeFromState]);
 
   // polling — cadence depends on the step
   useEffect(() => {
@@ -103,11 +72,6 @@ export default function PlayPage() {
           const res = await fetch("/api/state?full=1", { cache: "no-store" });
           const data = await res.json();
           setPhase(data.phase);
-          if (data.phase === "ended") {
-            // game finished while they were still picking — show the winners
-            setStep("final");
-            return;
-          }
           setCount(data.count);
           const counts = {};
           for (const p of data.players) counts[p.team] = (counts[p.team] || 0) + 1;
@@ -120,15 +84,9 @@ export default function PlayPage() {
         const data = await res.json();
         // during a live run, only yank the player out for reset/ended
         if (stepRef.current === "game") {
-          if (data.me === null) {
-            missesRef.current += 1;
-            if (missesRef.current >= 3) {
-              missesRef.current = 0;
-              clearIdentity();
-            }
-          } else if (data.phase === "ended") setStep("final");
+          if (data.me === null) clearIdentity();
+          else if (data.phase === "ended") setStep("final");
           else {
-            missesRef.current = 0;
             setPhase(data.phase);
             setCount(data.count ?? 0);
           }
@@ -155,19 +113,14 @@ export default function PlayPage() {
   }, [step, finalPlayers]);
 
   const join = async () => {
-    if (!teamPick || busy || joinInFlight.current) return;
-    joinInFlight.current = true;
+    if (!teamPick || busy) return;
     setBusy(true);
     setError("");
     try {
       const res = await fetch("/api/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          team: teamPick,
-          deviceId: getDeviceId(),
-        }),
+        body: JSON.stringify({ name: name.trim(), team: teamPick }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -175,24 +128,7 @@ export default function PlayPage() {
         return;
       }
       localStorage.setItem(STORAGE_KEY, data.id);
-      missesRef.current = 0;
-      if (data.rejoined) {
-        // this phone was already on the roster — sync to the server's record
-        const s = await fetch(`/api/state?id=${data.id}`, {
-          cache: "no-store",
-        }).then((r) => r.json());
-        routeFromState(s);
-        return;
-      }
-      setMe({
-        id: data.id,
-        name: name.trim(),
-        team: teamPick,
-        attempts: 0,
-        yards: 0,
-        touchdowns: 0,
-        totalYards: 0,
-      });
+      setMe({ id: data.id, name: name.trim(), team: teamPick, best: 0, attempts: 0 });
       setPhase(data.phase);
       if (data.phase === "playing") setStep("game");
       else if (data.phase === "ended") setStep("final");
@@ -200,69 +136,25 @@ export default function PlayPage() {
     } catch {
       setError("Network hiccup — try again!");
     } finally {
-      joinInFlight.current = false;
       setBusy(false);
     }
   };
 
-  // Leave the roster (lobby only) so the player can pick a different squad.
-  // If the game already started the server refuses and we keep our spot —
-  // the next poll routes us into the game.
-  const leave = async () => {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const id = localStorage.getItem(STORAGE_KEY);
-      if (id) {
-        const res = await fetch("/api/leave", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id }),
-        });
-        if (!res.ok) return;
-      }
-      localStorage.removeItem(STORAGE_KEY);
-      setMe(null);
-      setTeamPick(null);
-      setStep("team");
-    } catch {
-      /* network blip — stay put, the player can tap again */
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // Submit the gates cleared this attempt; returns the server's updated
-  // truth (attempts, drive yards, touchdowns) so the game overlay can show it.
-  const submitScore = useCallback(async (gates) => {
+  const submitScore = useCallback(async (score) => {
     const id = localStorage.getItem(STORAGE_KEY);
-    if (!id) return null;
+    if (!id) return;
     try {
       const res = await fetch("/api/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, gates }),
+        body: JSON.stringify({ id, score }),
       });
       const data = await res.json();
-      if (data.attempts != null) {
-        setMe((m) =>
-          m
-            ? {
-                ...m,
-                attempts: data.attempts,
-                yards: data.yards,
-                touchdowns: data.touchdowns,
-                totalYards: data.totalYards,
-              }
-            : m
-        );
-        return data;
+      if (res.ok || data.attempts != null) {
+        setMe((m) => (m ? { ...m, best: data.best, attempts: data.attempts } : m));
       }
-      return null;
     } catch {
-      /* score lost to a network blip — the next poll re-syncs */
-      return null;
+      /* score lost to a network blip — their next run can still beat it */
     }
   }, []);
 
@@ -271,8 +163,8 @@ export default function PlayPage() {
 
   const title = (
     <h1 className="title">
-      <span className="utop">UNC CHARLOTTE ⛏ UTOP</span>
-      <span className="flappy">GRIDIRON FLAPPY</span>
+      <span className="utop">✦ UTOP ✦</span>
+      <span className="flappy">FLAPPYBIRD</span>
     </h1>
   );
 
@@ -334,17 +226,7 @@ export default function PlayPage() {
           </div>
           {error && <div className="err">{error}</div>}
           <button className="btn" disabled={!teamPick || busy} onClick={join}>
-            {busy ? "JOINING…" : "JOIN THE ROSTER 🏈"}
-          </button>
-          <button
-            className="btn secondary small"
-            disabled={busy}
-            onClick={() => {
-              setError("");
-              setStep("name");
-            }}
-          >
-            ◀ BACK
+            {busy ? "JOINING…" : "JOIN LOBBY 🚀"}
           </button>
         </div>
       )}
@@ -359,14 +241,10 @@ export default function PlayPage() {
           <div className="hint">
             <strong>{count}</strong> player{count === 1 ? "" : "s"} in the stadium.
             <br />
-            You get <strong>{MAX_ATTEMPTS} attempts</strong> — march your drive{" "}
-            <strong>{TD_YARDS} yards</strong> for a touchdown!
+            Waiting for kickoff…
             <br />
-            Waiting for kickoff… keep this page open! 📱
+            Keep this page open! 📱
           </div>
-          <button className="btn secondary small" disabled={busy} onClick={leave}>
-            🚪 WRONG TEAM? PICK AGAIN
-          </button>
         </div>
       )}
 
@@ -380,24 +258,12 @@ export default function PlayPage() {
               {"🏈".repeat(attemptsLeft)}
               {"⚪".repeat(MAX_ATTEMPTS - attemptsLeft)}
             </span>
-            <span className="best">{me.touchdowns} TD{me.touchdowns === 1 ? "" : "s"}</span>
-          </div>
-          <div className="drive-meter panel">
-            <div className="drive-meter-label">
-              DRIVE <strong>{me.yards}</strong> / {TD_YARDS} YDS
-            </div>
-            <div className="drive-meter-track">
-              <div
-                className="drive-meter-fill"
-                style={{ width: `${(me.yards / TD_YARDS) * 100}%` }}
-              />
-            </div>
+            <span className="best">BEST {me.best}</span>
           </div>
           <FlappyGame
             color={myTeam.color}
             attemptsLeft={attemptsLeft}
-            driveYards={me.yards}
-            touchdowns={me.touchdowns}
+            best={me.best}
             onRunEnd={submitScore}
             onFinished={() => setStep(phase === "ended" ? "final" : "done")}
           />
@@ -408,23 +274,16 @@ export default function PlayPage() {
         <div className="step-card panel">
           <div className="waiting-bird">🏟️</div>
           <div className="step-title">
-            ALL {MAX_ATTEMPTS} ATTEMPTS USED!
-          </div>
-          <div className="stat-row">
-            <div className="stat">
-              <span className="stat-num">{me.touchdowns}</span>
-              <span className="stat-label">TOUCHDOWN{me.touchdowns === 1 ? "" : "S"}</span>
-            </div>
-            <div className="stat">
-              <span className="stat-num">{me.totalYards}</span>
-              <span className="stat-label">TOTAL YARDS</span>
-            </div>
+            ALL {MAX_ATTEMPTS} DOWNS PLAYED!
+            <br />
+            <br />
+            YOUR BEST: {me.best}
           </div>
           <div className="badge" style={{ "--team": myTeam.color }}>
             {myTeam.emoji} {myTeam.name}
           </div>
           <div className="hint">
-            Every TD and yard counts toward your squad&apos;s total. 💪
+            Your best score is locked in for your squad. 💪
             <br />
             Watch the big screen — final whistle coming soon!
           </div>
@@ -437,8 +296,7 @@ export default function PlayPage() {
           {me && myTeam && (
             <div className="center" style={{ margin: "14px 0" }}>
               <div className="badge" style={{ "--team": myTeam.color }}>
-                {myTeam.emoji} {me.name} · {me.touchdowns} TD ·{" "}
-                {me.totalYards} yds
+                {myTeam.emoji} {me.name} · best {me.best}
               </div>
             </div>
           )}

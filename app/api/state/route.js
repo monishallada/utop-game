@@ -28,10 +28,8 @@ export async function GET(request) {
         id: p.id,
         name: p.name,
         team: p.team,
+        best: p.best,
         attempts: p.attempts,
-        yards: p.yards || 0,
-        touchdowns: p.touchdowns || 0,
-        totalYards: p.totalYards || 0,
       })),
       redis: usingRedis(),
     });
@@ -41,15 +39,7 @@ export async function GET(request) {
   if (id) {
     const me = await getPlayer(id);
     result.me = me
-      ? {
-          id: me.id,
-          name: me.name,
-          team: me.team,
-          attempts: me.attempts,
-          yards: me.yards || 0,
-          touchdowns: me.touchdowns || 0,
-          totalYards: me.totalYards || 0,
-        }
+      ? { id: me.id, name: me.name, team: me.team, best: me.best, attempts: me.attempts }
       : null;
   }
   return NextResponse.json(result);

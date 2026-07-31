@@ -1,10 +1,10 @@
-import { Graduate, Rubik } from "next/font/google";
+import { Press_Start_2P, Rubik } from "next/font/google";
 import "./globals.css";
 
-const graduate = Graduate({
+const pressStart = Press_Start_2P({
   weight: "400",
   subsets: ["latin"],
-  variable: "--font-display",
+  variable: "--font-arcade",
   display: "swap",
 });
 
@@ -15,9 +15,8 @@ const rubik = Rubik({
 });
 
 export const metadata = {
-  title: "UTOP Gridiron Flappy — UNC Charlotte",
-  description:
-    "UNC Charlotte UTOP game day! Scan, squad up, and drive 100 yards for a touchdown.",
+  title: "UTOP Flappybird",
+  description: "Scan, pick your squad, and fly the football for glory!",
 };
 
 export const viewport = {
@@ -25,14 +24,14 @@ export const viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#005035",
+  themeColor: "#0b1023",
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className={`${graduate.variable} ${rubik.variable}`}>
-        <div className="field-bg" aria-hidden="true" />
+      <body className={`${pressStart.variable} ${rubik.variable}`}>
+        <div className="stars" aria-hidden="true" />
         {children}
       </body>
     </html>

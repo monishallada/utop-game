@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { TEAMS, CLASS_SIZE, MAX_ATTEMPTS } from "@/lib/teams";
+import { TEAMS, CLASS_SIZE } from "@/lib/teams";
 import { TeamBars, FinalBoard } from "@/components/Scoreboard";
 
 const POLL_MS = 2000;
@@ -22,7 +22,7 @@ export default function HostPage() {
     QRCode.toDataURL(url, {
       width: 560,
       margin: 1,
-      color: { dark: "#00281b", light: "#ffffff" },
+      color: { dark: "#0b1023", light: "#ffffff" },
     }).then(setQr);
   }, []);
 
@@ -73,33 +73,14 @@ export default function HostPage() {
   return (
     <main className="host">
       <h1 className="title">
-        <span className="utop">UNC CHARLOTTE ⛏ UTOP</span>
-        <span className="flappy">GRIDIRON FLAPPY</span>
+        <span className="utop">✦ UTOP ✦</span>
+        <span className="flappy">FLAPPYBIRD</span>
       </h1>
-
-      {state && state.redis === false && (
-        <p
-          style={{
-            background: "#7e1a1a",
-            color: "#fff",
-            fontWeight: 800,
-            padding: "10px 16px",
-            borderRadius: 10,
-            margin: "10px auto",
-            maxWidth: 720,
-            textAlign: "center",
-          }}
-        >
-          ⚠️ NO DATABASE CONNECTED — fine on localhost, but on Vercel the game
-          WILL break (kickoff won&apos;t stick, players get reset). Add Upstash
-          Redis in the Vercel dashboard, then redeploy.
-        </p>
-      )}
 
       {phase === "lobby" && (
         <>
           <p className="title-sub">
-            🏈 Scan the code · squad up · drive 100 yards for SIX! 🏈
+            🏈 Scan the code · pick your squad · fly the football 🏈
           </p>
 
           <div className="host-lobby">
@@ -167,23 +148,22 @@ export default function HostPage() {
             </button>
           </div>
 
+          {state && state.redis === false && (
+            <p className="hint" style={{ marginTop: 24 }}>
+              ⚠️ Running on in-memory storage (no Redis connected). Fine for
+              local testing — add Upstash Redis on Vercel before class!
+            </p>
+          )}
         </>
       )}
 
       {phase === "playing" && (
         <>
           <p className="title-sub">
-            🏈 GAME ON! 4 attempts each · yards carry over · 100 yards = a
-            touchdown. Most squad TDs wins!
+            🏈 GAME ON! Live team standings — each player&apos;s best score
+            counts toward the squad total.
           </p>
           <TeamBars players={players} showProgress />
-          {players.length > 0 &&
-            players.every((p) => p.attempts >= MAX_ATTEMPTS) && (
-              <p className="title-sub">
-                🏁 Everyone has finished their attempts — the game stays open
-                until YOU blow the whistle!
-              </p>
-            )}
           <div className="host-actions">
             <button
               className="btn secondary"
