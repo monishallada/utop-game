@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { TEAMS, CLASS_SIZE, MAX_ATTEMPTS } from "@/lib/teams";
+import { TEAMS, CLASS_SIZE } from "@/lib/teams";
 import { TeamBars, FinalBoard } from "@/components/Scoreboard";
 
 const POLL_MS = 2000;
@@ -164,13 +164,6 @@ export default function HostPage() {
             touchdown. Most squad TDs wins!
           </p>
           <TeamBars players={players} showProgress />
-          {players.length > 0 &&
-            players.every((p) => p.attempts >= MAX_ATTEMPTS) && (
-              <p className="title-sub">
-                🏁 Everyone has finished their attempts — the game stays open
-                until YOU blow the whistle!
-              </p>
-            )}
           <div className="host-actions">
             <button
               className="btn secondary"
